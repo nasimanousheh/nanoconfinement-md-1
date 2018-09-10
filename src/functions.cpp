@@ -1,4 +1,4 @@
-// This file contains the routines 
+// This file contains the routines
 
 #include "functions.h"
 
@@ -24,7 +24,7 @@ void make_bins(vector<DATABIN>& bin, INTERFACE& box, double bin_width)
 	  for (unsigned int num = 0; num < bin.size(); num++)
 		listbin << bin[num].n << setw(15) << bin[num].width << setw(15) << bin[num].volume << setw(15) << bin[num].lower << setw(15) << bin[num].higher << endl;
 	  listbin.close();
-	}  
+	}
   return;
 }
 
@@ -33,7 +33,7 @@ void initialize_particle_velocities(vector<PARTICLE>& ion, vector<THERMOSTAT>& b
 {
   if (bath.size() == 1)
   {
-    for (unsigned int i = 0; i < ion.size(); i++) 
+    for (unsigned int i = 0; i < ion.size(); i++)
       ion[i].velvec = VECTOR3D(0,0,0);					// initialized velocities
   	mpi::environment env;
 	mpi::communicator world;
@@ -42,18 +42,18 @@ void initialize_particle_velocities(vector<PARTICLE>& ion, vector<THERMOSTAT>& b
     return;
   }
   double p_sigma = sqrt(kB * bath[0].T / (2.0 * ion[0].m));		// Maxwell distribution width
-  
+
   // same random numbers used to generate the gaussian distribution every time. seed is fixed.
   // let me know if you need to change the rnd nums every run.
   UTILITY ugsl;
-  
-  for (unsigned int i = 0; i < ion.size(); i++) 
+
+  for (unsigned int i = 0; i < ion.size(); i++)
     ion[i].velvec = VECTOR3D(gsl_ran_gaussian(ugsl.r,p_sigma), gsl_ran_gaussian(ugsl.r,p_sigma), gsl_ran_gaussian(ugsl.r,p_sigma));	// initialized velocities
   VECTOR3D average_velocity_vector = VECTOR3D(0,0,0);
-  for (unsigned int i = 0; i < ion.size(); i++) 
+  for (unsigned int i = 0; i < ion.size(); i++)
     average_velocity_vector = average_velocity_vector + ion[i].velvec;
   average_velocity_vector = average_velocity_vector ^ (1.0/ion.size());
-  for (unsigned int i = 0; i < ion.size(); i++) 
+  for (unsigned int i = 0; i < ion.size(); i++)
     ion[i].velvec = ion[i].velvec - average_velocity_vector;
   return;
 }
@@ -95,10 +95,10 @@ void compute_n_write_useful_data(int cpmdstep, vector <PARTICLE> &ion, vector <T
                                  unsigned int upperBound, vector<double> &ion_energy,
                                  vector<double> &lj_ion_ion, vector<double> &lj_ion_leftdummy,
                                  vector<double> &lj_ion_leftwall, vector<double> &lj_ion_rightdummy,
-                                 vector<double> &lj_ion_rightwall) {
-									 
+                                 vector<double> &lj_ion_rightwall, vector <double> &Coulumb_rightwall, vector <double> &Coulumb_leftwall, double &meshCharge) {
+
     double potential_energy = energy_functional(ion, box, lowerBound, upperBound, ion_energy, lj_ion_ion,
-                                                lj_ion_leftdummy, lj_ion_leftwall, lj_ion_rightdummy, lj_ion_rightwall); 
+                                                lj_ion_leftdummy, lj_ion_leftwall, lj_ion_rightdummy, lj_ion_rightwall,Coulumb_rightwall, Coulumb_leftwall, meshCharge);
 	mpi::environment env;
 	mpi::communicator world;
 	if (world.rank() == 0) {
@@ -185,25 +185,25 @@ double compute_MD_trust_factor_R(int hiteqm)
 {
   string inPath= rootDirectory+"outfiles/energy.dat";
   ifstream in(inPath.c_str(), ios::in);
-  if (!in) 
+  if (!in)
   {
 	mpi::environment env;
 	mpi::communicator world;
 	if (world.rank() == 0)
-		cout << "File could not be opened" << endl; 
+		cout << "File could not be opened" << endl;
     return 0;
   }
-  
+
   int col1;
   double col2, col3, col4, col5, col6, col7;
   vector<double> ext, ke, pe;
-  while (in >> col1 >> col2 >> col3 >> col4 >> col5 >> col6 >> col7)			
+  while (in >> col1 >> col2 >> col3 >> col4 >> col5 >> col6 >> col7)
   {
     ext.push_back(col2);
     ke.push_back(col3);
     pe.push_back(col4);
   }
-  
+
   double ext_mean = 0;
   for (unsigned int i = 0; i < ext.size(); i++)
     ext_mean += ext[i];
@@ -212,19 +212,19 @@ double compute_MD_trust_factor_R(int hiteqm)
   for (unsigned int i = 0; i < ke.size(); i++)
     ke_mean += ke[i];
   ke_mean = ke_mean / ke.size();
- 
+
   double ext_sd = 0;
   for (unsigned int i = 0; i < ext.size(); i++)
     ext_sd += (ext[i] - ext_mean) * (ext[i] - ext_mean);
   ext_sd = ext_sd / ext.size();
   ext_sd = sqrt(ext_sd);
-  
+
   double ke_sd = 0;
   for (unsigned int i = 0; i < ke.size(); i++)
     ke_sd += (ke[i] - ke_mean) * (ke[i] - ke_mean);
   ke_sd = ke_sd / ke.size();
   ke_sd = sqrt(ke_sd);
-  
+
   double R = ext_sd / ke_sd;
   	mpi::environment env;
 	mpi::communicator world;
@@ -244,12 +244,12 @@ void auto_correlation_function()
 {
   string inPath= rootDirectory+"outfiles/for_auto_corr.dat";
   ifstream in(inPath.c_str(), ios::in);
-  if (!in) 
+  if (!in)
   {
 	mpi::environment env;
 	mpi::communicator world;
 	if (world.rank() == 0)
-		cout << "File could not be opened" << endl; 
+		cout << "File could not be opened" << endl;
     return;
   }
 
@@ -263,8 +263,8 @@ void auto_correlation_function()
     avg = avg + n[j];
   avg = avg / n.size();
 
-  int ntau = 5000;		// time to which the auto correlation function is computed 
-  
+  int ntau = 5000;		// time to which the auto correlation function is computed
+
   for (int i = 0; i < ntau; i++)
   {
     double A = 0;
@@ -280,7 +280,7 @@ void auto_correlation_function()
 	  ofstream out (outPath.c_str());
 	  for (int i = 0; i < ntau; i++)
 		out << i << setw(15) << autocorr[i]/autocorr[0] << endl;
-	  
+
 	  cout << "Auto correlation function generated" << endl;
   }
   return;

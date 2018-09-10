@@ -10,7 +10,7 @@
 #include "functions.h"
 
 void
-md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vector <DATABIN> &bin, CONTROL &mdremote, string &simulationParams) {
+md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vector <DATABIN> &bin, CONTROL &mdremote, string &simulationParams, double &meshCharge) {
 
 	mpi::environment env;
 	mpi::communicator world;
@@ -35,11 +35,13 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
     std::vector <VECTOR3D> lj_ion_rightdummy(sizFVec, VECTOR3D(0, 0, 0));
     std::vector <VECTOR3D> lj_ion_right_wall(sizFVec, VECTOR3D(0, 0, 0));
     std::vector <VECTOR3D> sendForceVector(sizFVec, VECTOR3D(0, 0, 0));
+		std::vector <VECTOR3D> Coulumb_rightwallForce(sizFVec, VECTOR3D(0, 0, 0));
+    std::vector <VECTOR3D> Coulumb_leftwallForce(sizFVec, VECTOR3D(0, 0, 0));
 
     initialize_particle_velocities(ion, real_bath);    // particle velocities initialized
     for_md_calculate_force(ion, box, 'y', lowerBound, upperBound, partialForceVector, lj_ion_ion, lj_ion_leftdummy,
                            lj_ion_left_wall, lj_ion_rightdummy,
-                           lj_ion_right_wall,sendForceVector);        // force on particles initialized
+                           lj_ion_right_wall,sendForceVector, Coulumb_rightwallForce, Coulumb_leftwallForce, meshCharge);        // force on particles initialized
     long double particle_ke = particle_kinetic_energy(ion);// compute initial kinetic energy
 
     long double potential_energy;
@@ -50,9 +52,11 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
     vector <double> lj_ion_leftwall_energy(sizFVec, 0.0);
     vector <double> lj_ion_rightdummy_energy(sizFVec, 0.0);
     vector <double> lj_ion_rightwall_energy(sizFVec, 0.0);
+		vector <double> Coulumb_rightwall_energy(sizFVec, 0.0);
+    vector <double> Coulumb_leftwall_energy(sizFVec, 0.0);
 
     // compute initial potential energy
-    potential_energy = energy_functional(ion, box, lowerBound, upperBound, ion_energy, lj_ion_ion_energy, lj_ion_leftdummy_energy, lj_ion_leftwall_energy, lj_ion_rightdummy_energy,lj_ion_rightwall_energy);
+    potential_energy = energy_functional(ion, box, lowerBound, upperBound, ion_energy, lj_ion_ion_energy, lj_ion_leftdummy_energy, lj_ion_leftwall_energy, lj_ion_rightdummy_energy,lj_ion_rightwall_energy, Coulumb_rightwall_energy, Coulumb_leftwall_energy, meshCharge);
 
 	// Output md essentials
     if (world.rank() == 0)
@@ -61,7 +65,7 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
 		cout << "Propagation of ions using Molecular Dynamics method" << " begins " << endl;
 		cout << "Time step in the simulation " << mdremote.timestep << endl;
 		cout << "Total number of simulation steps " << mdremote.steps << endl;
-		
+
 		// Output md essentials
 		if (mdremote.verbose)
         {
@@ -99,7 +103,7 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
     double density_profile_samples = 0;            // number of samples used to estimate density profile
 
     long double expfac_real;                // exponential factors useful in velocity Verlet routine
-	
+
 	double percentage=0,percentagePre=-1;
 
 
@@ -125,7 +129,7 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
             ion[i].update_position(mdremote.timestep);
         for_md_calculate_force(ion, box, 'y', lowerBound, upperBound, partialForceVector, lj_ion_ion, lj_ion_leftdummy,
                                lj_ion_left_wall, lj_ion_rightdummy,
-                               lj_ion_right_wall,sendForceVector);        // force on particles initialized
+                               lj_ion_right_wall,sendForceVector, Coulumb_rightwallForce, Coulumb_leftwallForce, meshCharge);        // force on particles initialized
         //#pragma omp parallel for schedule(dynamic) private(i)
         for (i = 0; i < ion.size(); i++)
             ion[i].new_update_velocity(mdremote.timestep, real_bath[0], expfac_real);
@@ -144,7 +148,7 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
         if (num == 1 || num % mdremote.extra_compute == 0)
         {
             energy_samples++;
-            compute_n_write_useful_data(num, ion, real_bath, box, lowerBound, upperBound, ion_energy, lj_ion_ion_energy, lj_ion_leftdummy_energy, lj_ion_leftwall_energy, lj_ion_rightdummy_energy,lj_ion_rightwall_energy);
+            compute_n_write_useful_data(num, ion, real_bath, box, lowerBound, upperBound, ion_energy, lj_ion_ion_energy, lj_ion_leftdummy_energy, lj_ion_leftwall_energy, lj_ion_rightdummy_energy,lj_ion_rightwall_energy, Coulumb_rightwall_energy, Coulumb_leftwall_energy,meshCharge );
         }
 
         // make a movie
@@ -230,9 +234,10 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
 
 		if (mdremote.verbose)
 		{
+
 		  cout << "Number of samples used to compute energy" << setw(10) << energy_samples << endl;
 		  cout << "Number of samples used to get density profile" << setw(10) << density_profile_samples << endl;
-		} 
+		}
 		cout << "Dynamics of ions simulated for " << mdremote.steps * mdremote.timestep * unittime * 1e9 << " nanoseconds" << endl;
 
     }

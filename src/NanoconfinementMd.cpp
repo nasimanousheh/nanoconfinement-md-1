@@ -14,6 +14,7 @@ double scalefactor;
 int NanoconfinementMd::startSimulation(int argc, char *argv[], bool paraMap) {
     // Electrostatic system variables
     double bx, by, bz;        // lengths of the box
+    double meshCharge;        //induce charge of each mesh point on planar wall/interface/surface
     double ein;            // permittivity of inside medium
     double eout;            // permittivity of outside medium
     int pz_in;            // positive valency of ions inside
@@ -57,7 +58,7 @@ int NanoconfinementMd::startSimulation(int argc, char *argv[], bool paraMap) {
              "dielectric const inside")        // must have ein = eout
             ("epsilon_out,E", value<double>(&eout)->default_value(80),
              "dielectric const outside")        // must have ein = eout
-            ("fraction_diameter,g", value<double>(&fraction_diameter)->default_value(1),
+            ("fraction_diameter,g", value<double>(&fraction_diameter)->default_value(0.04),
              "for interface discretization width")    // enter a perfect square
             ("thermostat_mass,Q", value<double>(&Q)->default_value(1.0), "thermostat mass")
             ("chain_length_real,L", value<unsigned int>(&chain_length_real)->default_value(5),
@@ -136,7 +137,8 @@ int NanoconfinementMd::startSimulation(int argc, char *argv[], bool paraMap) {
       unitlength = saltion_diameter_in * 0.5;
       unittime = sqrt(unitmass * unitlength * pow(10.0,-7) * unitlength / unitenergy);
       scalefactor = epsilon_water * lB_water / unitlength;
-    	bx = sqrt(212/0.6022/salt_conc_in/bz);
+    	//bx = sqrt(212/0.6022/salt_conc_in/bz);
+      bx = 10.508;
     	by=bx;
     	if (mdremote.steps < 100000)		// minimum mdremote.steps is 20000
       		mdremote.hiteqm = 10000;
@@ -157,6 +159,12 @@ int NanoconfinementMd::startSimulation(int argc, char *argv[], bool paraMap) {
     bin_ions(ion, box, initial_density, bin);    // bin the ions to get initial density profile
 
 	box.discretize(saltion_diameter_in / unitlength, fraction_diameter);
+  if(paraMap)
+{
+  //Induced charge of each mesh point on planar wall is equal to (total Charge density * surface area)/ (total mesh points * e)
+  //Here we consider the total charge density of planar wall -0.02 C/m2
+  meshCharge= (-0.02 * bx * by * pow(10.0,-18)) / (1.60217646 * pow(10.0,-19) * (box.leftplane.size()));
+}
 
 	if (world.rank() == 0)
 	{
@@ -261,7 +269,7 @@ int NanoconfinementMd::startSimulation(int argc, char *argv[], bool paraMap) {
     }
 
     // Simulation using Molecular Dynamics
-    md(ion, box, real_bath, bin, mdremote, simulationParams);
+    md(ion, box, real_bath, bin, mdremote, simulationParams, meshCharge);
 
     // Post simulation analysis (useful for short runs, but performed otherwise too)
 	if (world.rank() == 0)

@@ -8,15 +8,16 @@ long double energy_functional(vector <PARTICLE> &ion, INTERFACE &box, unsigned i
                               unsigned int upperBound, vector <double> &ion_energy,
                               vector <double> &lj_ion_ion, vector <double> &lj_ion_leftdummy,
                               vector <double> &lj_ion_leftwall, vector <double> &lj_ion_rightdummy,
-                              vector <double> &lj_ion_rightwall) {
+                              vector <double> &lj_ion_rightwall, vector <double> &Coulumb_rightwall, vector <double> &Coulumb_leftwall, double &meshCharge) {
 
 	mpi::environment env;
 	mpi::communicator world;
     unsigned int i, j, k;
-    double fqq, fqq_csh;
-    double fcsh_z, r1, r2, dz, fcsh_inf;
-    VECTOR3D temp_vec;
+    double fqq, fqq_csh, fqq_leftwall, fqq_csh_leftwall,fqq_csh_rightwall;
+    double fcsh_z, r1, r2, dz, fcsh_inf, dz_rightwall , r1_rightwall, r2_rightwall,dz_leftwall , r1_leftwall, fcsh_inf_rightwall, fcsh_z_rightwall, r2_leftwall, fcsh_z_leftwall,fcsh_inf_leftwall;
+    VECTOR3D temp_vec, temp_vec_rightwall, temp_vec_leftwall;
     double potential,totalPotential;
+
 
     // push_back is not compatible with pragma, so we have initialize vector in this way.
 
@@ -52,12 +53,89 @@ long double energy_functional(vector <PARTICLE> &ion, INTERFACE &box, unsigned i
             ion_energy[i-lowerBound] = fqq + fqq_csh;
         }
     }
+    PARTICLE wall_dummy;
+//Coulomb interaction ion-rightwall///////////////////////////////////////////////////////////////////////////
+#pragma omp parallel default(shared) private(i, j, fqq, fqq_csh_rightwall, dz_rightwall , r1_rightwall, r2_rightwall, fcsh_inf_rightwall, fcsh_z_rightwall, temp_vec_rightwall)
+    {
+#pragma omp for schedule(dynamic) nowait
+        for (i = lowerBound; i <= upperBound; i++) {
+          fqq = 0;
+          fqq_csh_rightwall = 0;
+          if (ion[i].posvec.z > 0.5 * box.lz - ion[i].diameter)  // avoiding calculating interactions between right wall and ions in bulk
+          {
+            for (k = 0; k < box.rightplane.size(); k++) {
+                wall_dummy = PARTICLE(0, ion[i].diameter, -1, meshCharge, 0, box.eout,
+                                      VECTOR3D(box.rightplane[k].posvec.x, box.rightplane[k].posvec.y,
+                                               box.rightplane[k].posvec.z), box.lx, box.ly,
+                                      box.lz);// + 0.5 * ion[i].diameter
+
+              dz_rightwall  = ion[i].posvec.z - wall_dummy.posvec.z;
+              r1_rightwall = sqrt(0.5 + (dz_rightwall  / box.lx) * (dz_rightwall  / box.lx));
+              r2_rightwall = sqrt(0.25 + (dz_rightwall  / box.lx) * (dz_rightwall  / box.lx));
+              fcsh_z_rightwall = 4 * box.lx * log((0.5 + r1_rightwall) / r2_rightwall) - fabs(dz_rightwall ) * (2 * pi - 4 * atan(4 * fabs(dz_rightwall ) * r1_rightwall / box.lx));
+              fcsh_inf_rightwall = -2 * pi * fabs(dz_rightwall );
+              fqq_csh_rightwall += ion[i].q * (wall_dummy.q / (box.lx * box.lx)) * 0.5 * (1 / ion[i].epsilon + 1 / wall_dummy.epsilon) *
+                         (fcsh_inf_rightwall - fcsh_z_rightwall);
+
+            //  if (i == j) continue;
+
+              temp_vec_rightwall = ion[i].posvec - wall_dummy.posvec;
+              if (temp_vec_rightwall.x > box.lx / 2) temp_vec_rightwall.x -= box.lx;
+              if (temp_vec_rightwall.x < -box.lx / 2) temp_vec_rightwall.x += box.lx;
+              if (temp_vec_rightwall.y > box.ly / 2) temp_vec_rightwall.y -= box.ly;
+              if (temp_vec_rightwall.y < -box.ly / 2) temp_vec_rightwall.y += box.ly;
+
+            fqq += 0.5 * ion[i].q * wall_dummy.q * 0.5 * (1.0 / ion[i].epsilon + 1.0 / wall_dummy.epsilon) / ((temp_vec_rightwall).GetMagnitude());
+        }
+        Coulumb_rightwall[i-lowerBound] = fqq + fqq_csh_rightwall;
+    }
+}
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//Coulomb interaction ion-leftwall///////////////////////////////////////////////////////////////////////////
+#pragma omp parallel default(shared) private(i, j, fqq_leftwall, fqq_csh_leftwall, dz_leftwall, r1_leftwall, r2_leftwall, fcsh_inf_leftwall, fcsh_z_leftwall, temp_vec_leftwall)
+      {
+  #pragma omp for schedule(dynamic) nowait
+          for (i = lowerBound; i <= upperBound; i++) {
+            fqq_leftwall = 0;
+            fqq_csh_leftwall = 0;
+            if (ion[i].posvec.z < -0.5 * box.lz +
+                                  ion[i].diameter)   // avoiding calculating interactions between left wall and ions in bulk
+            {
+                for (k = 0; k < box.leftplane.size(); k++) {
+                    wall_dummy = PARTICLE(0, ion[i].diameter, -1, meshCharge, 0, box.eout,
+                                          VECTOR3D(box.leftplane[k].posvec.x, box.leftplane[k].posvec.y,
+                                                   box.leftplane[k].posvec.z), box.lx, box.ly,
+                                          box.lz);// - 0.5 * ion[i].diameter
+
+                dz_leftwall = ion[i].posvec.z - wall_dummy.posvec.z;
+                r1_leftwall = sqrt(0.5 + (dz_leftwall / box.lx) * (dz_leftwall / box.lx));
+                r2_leftwall = sqrt(0.25 + (dz_leftwall / box.lx) * (dz_leftwall / box.lx));
+                fcsh_z_leftwall = 4 * box.lx * log((0.5 + r1_leftwall) / r2_leftwall) - fabs(dz_leftwall) * (2 * pi - 4 * atan(4 * fabs(dz_leftwall) * r1_leftwall / box.lx));
+                fcsh_inf_leftwall = -2 * pi * fabs(dz_leftwall);
+                fqq_leftwall += ion[i].q * (wall_dummy.q / (box.lx * box.lx)) * 0.5 * (1 / ion[i].epsilon + 1 / wall_dummy.epsilon) *
+                           (fcsh_inf_leftwall - fcsh_z_leftwall);
+
+              //  if (i == j) continue;
+
+                temp_vec_leftwall = ion[i].posvec - wall_dummy.posvec;
+                if (temp_vec_leftwall.x > box.lx / 2) temp_vec_leftwall.x -= box.lx;
+                if (temp_vec_leftwall.x < -box.lx / 2) temp_vec_leftwall.x += box.lx;
+                if (temp_vec_leftwall.y > box.ly / 2) temp_vec_leftwall.y -= box.ly;
+                if (temp_vec_leftwall.y < -box.ly / 2) temp_vec_leftwall.y += box.ly;
+
+              fqq_leftwall += 0.5 * ion[i].q * wall_dummy.q * 0.5 * (1.0 / ion[i].epsilon + 1.0 / wall_dummy.epsilon) / ((temp_vec_leftwall).GetMagnitude());
+          }
+          Coulumb_leftwall[i-lowerBound] = fqq_leftwall + fqq_csh_leftwall;
+      }
+  }
+}
 
     // Excluded volume interaction energy given by purely repulsive LJ
 
     // ion-ion
     VECTOR3D r_vec;
-    PARTICLE wall_dummy;
     double ulj, uljcc, elj, r, r6, d, d2, d6;
 #pragma omp parallel default(shared) private(i, j, uljcc, r, r2, r6, d, d2, d6, elj, r_vec)
     {
@@ -125,7 +203,7 @@ long double energy_functional(vector <PARTICLE> &ion, INTERFACE &box, unsigned i
                                   ion[i].diameter)   // avoiding calculating interactions between left wall and ions in bulk
             {
                 for (k = 0; k < box.leftplane.size(); k++) {
-                    wall_dummy = PARTICLE(0, ion[i].diameter, 0, 0, 0, box.eout,
+                    wall_dummy = PARTICLE(0, ion[i].diameter, -1, meshCharge, 0, box.eout,
                                           VECTOR3D(box.leftplane[k].posvec.x, box.leftplane[k].posvec.y,
                                                    box.leftplane[k].posvec.z - 0.5 * ion[i].diameter), box.lx, box.ly,
                                           box.lz);
@@ -159,7 +237,7 @@ long double energy_functional(vector <PARTICLE> &ion, INTERFACE &box, unsigned i
         if (ion[i].posvec.z >
             0.5 * box.lz - ion[i].diameter)  // avoiding calculating interactions between right wall and ions in bulk
         {
-            PARTICLE dummy = PARTICLE(0, ion[i].diameter, 0, 0, 0, box.eout,
+            PARTICLE dummy = PARTICLE(0, ion[i].diameter, -1, meshCharge, 0, box.eout,
                                       VECTOR3D(ion[i].posvec.x, ion[i].posvec.y, 0.5 * box.lz + 0.5 * ion[i].diameter),
                                       box.lx, box.ly, box.lz);
             VECTOR3D r_vec = ion[i].posvec - dummy.posvec;
@@ -186,7 +264,7 @@ long double energy_functional(vector <PARTICLE> &ion, INTERFACE &box, unsigned i
                                   ion[i].diameter)  // avoiding calculating interactions between right wall and ions in bulk
             {
                 for (k = 0; k < box.rightplane.size(); k++) {
-                    wall_dummy = PARTICLE(0, ion[i].diameter, 0, 0, 0, box.eout,
+                    wall_dummy = PARTICLE(0, ion[i].diameter, -1, meshCharge, 0, box.eout,
                                           VECTOR3D(box.rightplane[k].posvec.x, box.rightplane[k].posvec.y,
                                                    box.rightplane[k].posvec.z + 0.5 * ion[i].diameter), box.lx, box.ly,
                                           box.lz);
@@ -218,6 +296,8 @@ long double energy_functional(vector <PARTICLE> &ion, INTERFACE &box, unsigned i
     double total_lj_ion_leftwall = 0;
     double total_lj_ion_rightdummy = 0;
     double total_lj_ion_rightwall = 0;
+    double total_Coulumb_leftwall = 0;
+    double total_Coulumb_rightwall = 0;
     for (i = lowerBound; i <= upperBound; i++) {
         ion_ion += ion_energy[i-lowerBound];
         total_lj_ion_ion += lj_ion_ion[i-lowerBound];
@@ -225,6 +305,8 @@ long double energy_functional(vector <PARTICLE> &ion, INTERFACE &box, unsigned i
         total_lj_ion_leftwall += lj_ion_leftwall[i-lowerBound];
         total_lj_ion_rightdummy += lj_ion_rightdummy[i-lowerBound];
         total_lj_ion_rightwall += lj_ion_rightwall[i-lowerBound];
+        total_Coulumb_rightwall += Coulumb_rightwall[i-lowerBound];
+        total_Coulumb_leftwall += Coulumb_leftwall[i-lowerBound];
     }
     // electrostatic potential energy
     double coulomb = (ion_ion) * scalefactor;    // scalefactor is there to ensure proper units; defined in utility.h
@@ -233,7 +315,7 @@ long double energy_functional(vector <PARTICLE> &ion, INTERFACE &box, unsigned i
     // factor of half for double counting, same reasoning as electrostatic energy
 
     potential = coulomb + total_lj_ion_ion + total_lj_ion_leftdummy + total_lj_ion_leftwall
-                       + total_lj_ion_rightdummy + total_lj_ion_rightwall;
+                       + total_lj_ion_rightdummy + total_lj_ion_rightwall + total_Coulumb_rightwall + total_Coulumb_leftwall;;
 
     //MPI Operations
     if (world.size() > 1) {
@@ -247,4 +329,3 @@ long double energy_functional(vector <PARTICLE> &ion, INTERFACE &box, unsigned i
 
     return totalPotential;
 }
-
