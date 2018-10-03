@@ -11,6 +11,7 @@
 double unitlength;
 double unittime;
 double scalefactor;
+double chargeDensity;
 int NanoconfinementMd::startSimulation(int argc, char *argv[], bool paraMap) {
     // Electrostatic system variables
     double bx, by, bz;        // lengths of the box
@@ -163,7 +164,8 @@ int NanoconfinementMd::startSimulation(int argc, char *argv[], bool paraMap) {
 {
   //Induced charge of each mesh point on planar wall is equal to (total Charge density * surface area)/ (total mesh points * e)
   //Here we consider the total charge density of planar wall -0.02 C/m2
-  meshCharge= (-0.02 * bx * by * pow(10.0,-18)) / (1.60217646 * pow(10.0,-19) * (box.leftplane.size()));
+  chargeDensity = -0.02;
+  meshCharge= (chargeDensity * bx * by * pow(10.0,-18)) / (1.60217646 * pow(10.0,-19) * (box.leftplane.size()));
 }
 
 	if (world.rank() == 0)
@@ -269,7 +271,7 @@ int NanoconfinementMd::startSimulation(int argc, char *argv[], bool paraMap) {
     }
 
     // Simulation using Molecular Dynamics
-    md(ion, box, real_bath, bin, mdremote, simulationParams, meshCharge);
+    md(ion, box, real_bath, bin, mdremote, simulationParams, meshCharge, saltion_diameter_in, chargeDensity);
 
     // Post simulation analysis (useful for short runs, but performed otherwise too)
 	if (world.rank() == 0)

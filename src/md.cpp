@@ -10,7 +10,7 @@
 #include "functions.h"
 
 void
-md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vector <DATABIN> &bin, CONTROL &mdremote, string &simulationParams, double &meshCharge) {
+md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vector <DATABIN> &bin, CONTROL &mdremote, string &simulationParams, double &meshCharge, double diameter, double chargeDensity) {
 
 	mpi::environment env;
 	mpi::communicator world;
@@ -213,19 +213,46 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
 
     if (world.rank() == 0) {
         // 3. write results
-		string p_density_profile, n_density_profile;
+		string p_density_profile, n_density_profile, p_pressure_profile,n_pressure_profile;;
 		p_density_profile=rootDirectory+"data/p_density_profile"+simulationParams+".dat";
 		n_density_profile=rootDirectory+"data/n_density_profile"+simulationParams+".dat";
+		p_pressure_profile=rootDirectory+"data/p_pressure_profile"+simulationParams+".dat";
+		n_pressure_profile=rootDirectory+"data/n_pressure_profile"+simulationParams+".dat";
 		ofstream list_p_profile(p_density_profile.c_str(), ios::out);
 		ofstream list_n_profile(n_density_profile.c_str(), ios::out);
+		ofstream listpress_p_profile(p_pressure_profile.c_str(), ios::out);
+		ofstream listpress_n_profile(n_pressure_profile.c_str(), ios::out);
 		for (unsigned int b = 0; b < positiveion_density_profile.size(); b++)
-			list_p_profile << (-0.5 * box.lz + b * bin[b].width) * unitlength << setw(15)
-						   << positiveion_density_profile.at(b) << setw(15) << p_error_bar.at(b)
-						   << endl; // change in the z coordinate, counted from leftwall
+		{
+			list_p_profile << (-0.5 * box.lz + b * bin[b].width) * unitlength << setw(15)<< positiveion_density_profile.at(b) << setw(15) << p_error_bar.at(b) << endl; // change in the z coordinate, counted from leftwall
+			//Calculate the Pressure from contact theory:
+			if (((b * bin[b].width) * unitlength)== (0.5 * diameter))
+			{
+				//StericPressure= KT * (ContactDensity)
+				// ContactDEnsity is the value of density at the distance of half ion diameter far from the surface;
+				double StericPressure = (positiveion_density_profile.at(b) * 0.6022 * pow(10.0, 27) * 298 * 1.3806 * pow(1  0.0,-23));// The unit is in Pascal
+				//CoulombicPressure =  (chargeDensity^2)/(2 * epsilon_water * Permittivity constant)
+				double CoulombicPressure = (chargeDensity * chargeDensity)/(2 * epsilon_water * 8.85 * pow(10.0, -12)); // The unit is in Pascal
+				listpress_p_profile << (-0.5 * box.lz + b * bin[b].width) * unitlength << setw(15)
+								 <<  positiveion_density_profile.at(b) << setw(15)<< StericPressure << setw(15) << CoulombicPressure << setw(15) << (StericPressure -  CoulombicPressure )<< setw(15)<<endl;
+			}
+		}
+
 		for (unsigned int b = 0; b < negativeion_density_profile.size(); b++)
-			list_n_profile << (-0.5 * box.lz + b * bin[b].width) * unitlength << setw(15)
-						   << negativeion_density_profile.at(b) << setw(15) << n_error_bar.at(b)
-						   << endl; // change in the z coordinate, counted from leftwall
+		{
+			list_n_profile << (-0.5 * box.lz + b * bin[b].width) * unitlength << setw(15)<< negativeion_density_profile.at(b) << setw(15) << n_error_bar.at(b)<< endl; // change in the z coordinate, counted from leftwall
+			//Calculate the Pressure from contact theory:
+			if (((b * bin[b].width) * unitlength)== (0.5 * diameter))
+			{
+				//StericPressure= KT * (ContactDensity)
+				// ContactDEnsity is the value of density at the distance of half ion diameter far from the surface;
+				double StericPressure = (negativeion_density_profile.at(b) * 0.6022 * pow(10.0, 27) * 298 * 1.3806 * pow(10.0,-23));// The unit is in Pascal
+				//CoulombicPressure =  (chargeDensity^2)/(2 * epsilon_water * Permittivity constant)
+				double CoulombicPressure = (chargeDensity * chargeDensity)/(2 * epsilon_water * 8.85 * pow(10.0, -12)); // The unit is in Pascal
+				listpress_n_profile << (-0.5 * box.lz + b * bin[b].width) * unitlength << setw(15)
+								 <<  negativeion_density_profile.at(b) << setw(15) << StericPressure << setw(15) << CoulombicPressure << setw(15) << (StericPressure -  CoulombicPressure )<< setw(15)<<endl;
+			}
+		}
 
 		string finalConFilePath= rootDirectory+"outfiles/final_configuration.dat";
 		ofstream final_configuration(finalConFilePath.c_str());
