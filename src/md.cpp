@@ -230,7 +230,7 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
 			{
 				//StericPressure= KT * (ContactDensity)
 				// ContactDEnsity is the value of density at the distance of half ion diameter far from the surface;
-				double StericPressure = (positiveion_density_profile.at(b) * 0.6022 * pow(10.0, 27) * 298 * 1.3806 * pow(1  0.0,-23));// The unit is in Pascal
+				double StericPressure = (positiveion_density_profile.at(b) * 0.6022 * pow(10.0, 27) * 298 * 1.3806 * pow(10.0,-23));// The unit is in Pascal
 				//CoulombicPressure =  (chargeDensity^2)/(2 * epsilon_water * Permittivity constant)
 				double CoulombicPressure = (chargeDensity * chargeDensity)/(2 * epsilon_water * 8.85 * pow(10.0, -12)); // The unit is in Pascal
 				listpress_p_profile << (-0.5 * box.lz + b * bin[b].width) * unitlength << setw(15)
