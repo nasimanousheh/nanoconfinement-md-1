@@ -7,7 +7,7 @@ void for_md_calculate_force(vector <PARTICLE> &ion, INTERFACE &box, char flag, u
                             unsigned int upperBound, vector <VECTOR3D> &partialForceVector,
                             vector <VECTOR3D> &lj_ion_ion, vector <VECTOR3D> &lj_ion_leftdummy,
                             vector <VECTOR3D> &lj_ion_left_wall, vector <VECTOR3D> &lj_ion_rightdummy,
-                            vector <VECTOR3D> &lj_ion_right_wall, vector <VECTOR3D> &sendForceVector, vector <VECTOR3D> &Coulumb_rightwallForce, vector <VECTOR3D> &Coulumb_leftwallForce, double &meshCharge) {
+                            vector <VECTOR3D> &lj_ion_right_wall, vector <VECTOR3D> &sendForceVector, vector <VECTOR3D> &Coulumb_rightwallForce, vector <VECTOR3D> &Coulumb_leftwallForce, double &meshCharge, VECTOR3D &Sum_Force_Rightside, VECTOR3D &Sum_Force_Leftside) {
 
 	mpi::environment env;
 	mpi::communicator world;
@@ -335,15 +335,32 @@ void for_md_calculate_force(vector <PARTICLE> &ion, INTERFACE &box, char flag, u
             ion[i].forvec = partialForceVector[i];
 
     } else {
+      Sum_Force_Rightside = VECTOR3D(0, 0, 0);
+      Sum_Force_Leftside = VECTOR3D(0, 0, 0);
 
         // total force on the particle = the electrostatic force + the Lennard-Jones force in main processes
-        for (i = lowerBound; i <= upperBound; i++)
+        for (i = lowerBound; i <= upperBound; i++){
             ion[i].forvec =
                     sendForceVector[i - lowerBound] + lj_ion_ion[i - lowerBound] + lj_ion_leftdummy[i - lowerBound] +
                     lj_ion_left_wall[i - lowerBound] + lj_ion_rightdummy[i - lowerBound] +
                     lj_ion_right_wall[i - lowerBound] + Coulumb_rightwallForce[i - lowerBound] + Coulumb_leftwallForce[i - lowerBound];
 
+          // Total force in z direction in the right slab between 0.0 and 0.5;
+                    if ((ion[i].posvec.z <= 0.5) && (ion[i].posvec.z >= 0.0))
+                    {
+                      Sum_Force_Rightside = Sum_Force_Rightside + sendForceVector[i - lowerBound] + lj_ion_ion[i - lowerBound] + lj_ion_leftdummy[i - lowerBound] +
+                      lj_ion_left_wall[i - lowerBound] + lj_ion_rightdummy[i - lowerBound] +
+                      lj_ion_right_wall[i - lowerBound] + Coulumb_rightwallForce[i - lowerBound] + Coulumb_leftwallForce[i - lowerBound];
+                    }
+          // Total force in z direction in the left slab between 0.0 and -0.5;
+                    if ((ion[i].posvec.z <= 0.0) && (ion[i].posvec.z >= -0.5))
+                    {
+                      Sum_Force_Leftside = Sum_Force_Leftside + sendForceVector[i - lowerBound] + lj_ion_ion[i - lowerBound] + lj_ion_leftdummy[i - lowerBound] +
+                      lj_ion_left_wall[i - lowerBound] + lj_ion_rightdummy[i - lowerBound] +
+                      lj_ion_right_wall[i - lowerBound] + Coulumb_rightwallForce[i - lowerBound] + Coulumb_leftwallForce[i - lowerBound];
+                    }
     }
+  }
 
     return;
 }

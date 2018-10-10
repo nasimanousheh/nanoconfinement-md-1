@@ -20,6 +20,7 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
     unsigned int upperBound = (world.rank()+1)*range - 1;
     unsigned int extraElements=world.size()*range-ion.size();
     unsigned int sizFVec = upperBound-lowerBound+1;
+		double force_profile_samples = 0.0;
     if (world.rank() == world.size() - 1){
         upperBound = ion.size() - 1;
         sizFVec = upperBound-lowerBound+1+extraElements;
@@ -37,11 +38,16 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
     std::vector <VECTOR3D> sendForceVector(sizFVec, VECTOR3D(0, 0, 0));
 		std::vector <VECTOR3D> Coulumb_rightwallForce(sizFVec, VECTOR3D(0, 0, 0));
     std::vector <VECTOR3D> Coulumb_leftwallForce(sizFVec, VECTOR3D(0, 0, 0));
+		VECTOR3D Force_Rightside, Force_Leftside, Sum_Force_Rightside, Sum_Force_Leftside;
+		Force_Rightside = VECTOR3D(0, 0, 0);
+		Force_Leftside = VECTOR3D(0, 0, 0);
+		Sum_Force_Rightside = VECTOR3D(0, 0, 0);
+		Sum_Force_Leftside = VECTOR3D(0, 0, 0);
 
     initialize_particle_velocities(ion, real_bath);    // particle velocities initialized
     for_md_calculate_force(ion, box, 'y', lowerBound, upperBound, partialForceVector, lj_ion_ion, lj_ion_leftdummy,
                            lj_ion_left_wall, lj_ion_rightdummy,
-                           lj_ion_right_wall,sendForceVector, Coulumb_rightwallForce, Coulumb_leftwallForce, meshCharge);        // force on particles initialized
+                           lj_ion_right_wall,sendForceVector, Coulumb_rightwallForce, Coulumb_leftwallForce, meshCharge, Force_Rightside, Force_Leftside);        // force on particles initialized
     long double particle_ke = particle_kinetic_energy(ion);// compute initial kinetic energy
 
     long double potential_energy;
@@ -129,8 +135,12 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
             ion[i].update_position(mdremote.timestep);
         for_md_calculate_force(ion, box, 'y', lowerBound, upperBound, partialForceVector, lj_ion_ion, lj_ion_leftdummy,
                                lj_ion_left_wall, lj_ion_rightdummy,
-                               lj_ion_right_wall,sendForceVector, Coulumb_rightwallForce, Coulumb_leftwallForce, meshCharge);        // force on particles initialized
-        //#pragma omp parallel for schedule(dynamic) private(i)
+                               lj_ion_right_wall,sendForceVector, Coulumb_rightwallForce, Coulumb_leftwallForce, meshCharge, Force_Rightside, Force_Leftside);        // force on particles initialized
+//Here we sum all force values in left and right slabs:
+															 Sum_Force_Rightside = Sum_Force_Rightside + Force_Rightside;
+															 Sum_Force_Leftside = Sum_Force_Leftside + Force_Leftside;
+															 force_profile_samples++;
+			  //#pragma omp parallel for schedule(dynamic) private(i)
         for (i = 0; i < ion.size(); i++)
             ion[i].new_update_velocity(mdremote.timestep, real_bath[0], expfac_real);
 
@@ -188,6 +198,20 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
 		}
     }
 
+		if (world.rank() == 0)
+{
+	//Sum = Sum/mdremote.steps;
+	string force_right, force_left;
+	force_right = rootDirectory+"data/force_right";
+	ofstream list_force_Rightside(force_right.c_str(), ios::out);
+	force_left = rootDirectory+"data/force_left";
+	ofstream list_force_Leftside(force_left.c_str(), ios::out);
+	list_force_Rightside << Sum_Force_Rightside.z / force_profile_samples<< endl;
+	list_force_Leftside << Sum_Force_Leftside.z / force_profile_samples << endl;
+	list_force_Rightside.close();
+	list_force_Leftside.close();
+}
+
 
     // Part III : Analysis
     // 1. density profile
@@ -222,6 +246,9 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
 		ofstream list_n_profile(n_density_profile.c_str(), ios::out);
 		ofstream listpress_p_profile(p_pressure_profile.c_str(), ios::out);
 		ofstream listpress_n_profile(n_pressure_profile.c_str(), ios::out);
+		//CoulombicPressure =  (chargeDensity^2)/(2 * epsilon_water * Permittivity constant)
+		double CoulombicPressure = (chargeDensity * chargeDensity)/(2 * epsilon_water * 8.85 * pow(10.0, -12)); // The unit is in Pascal
+
 		for (unsigned int b = 0; b < positiveion_density_profile.size(); b++)
 		{
 			list_p_profile << (-0.5 * box.lz + b * bin[b].width) * unitlength << setw(15)<< positiveion_density_profile.at(b) << setw(15) << p_error_bar.at(b) << endl; // change in the z coordinate, counted from leftwall
@@ -231,10 +258,8 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
 				//StericPressure= KT * (ContactDensity)
 				// ContactDEnsity is the value of density at the distance of half ion diameter far from the surface;
 				double StericPressure = (positiveion_density_profile.at(b) * 0.6022 * pow(10.0, 27) * 298 * 1.3806 * pow(10.0,-23));// The unit is in Pascal
-				//CoulombicPressure =  (chargeDensity^2)/(2 * epsilon_water * Permittivity constant)
-				double CoulombicPressure = (chargeDensity * chargeDensity)/(2 * epsilon_water * 8.85 * pow(10.0, -12)); // The unit is in Pascal
 				listpress_p_profile << (-0.5 * box.lz + b * bin[b].width) * unitlength << setw(15)
-								 <<  positiveion_density_profile.at(b) << setw(15)<< StericPressure << setw(15) << CoulombicPressure << setw(15) << (StericPressure -  CoulombicPressure )<< setw(15)<<endl;
+								 <<  positiveion_density_profile.at(b) << setw(15)<< StericPressure << setw(15) << CoulombicPressure << setw(15) << endl;
 			}
 		}
 
@@ -247,10 +272,8 @@ md(vector <PARTICLE> &ion, INTERFACE &box, vector <THERMOSTAT> &real_bath, vecto
 				//StericPressure= KT * (ContactDensity)
 				// ContactDEnsity is the value of density at the distance of half ion diameter far from the surface;
 				double StericPressure = (negativeion_density_profile.at(b) * 0.6022 * pow(10.0, 27) * 298 * 1.3806 * pow(10.0,-23));// The unit is in Pascal
-				//CoulombicPressure =  (chargeDensity^2)/(2 * epsilon_water * Permittivity constant)
-				double CoulombicPressure = (chargeDensity * chargeDensity)/(2 * epsilon_water * 8.85 * pow(10.0, -12)); // The unit is in Pascal
 				listpress_n_profile << (-0.5 * box.lz + b * bin[b].width) * unitlength << setw(15)
-								 <<  negativeion_density_profile.at(b) << setw(15) << StericPressure << setw(15) << CoulombicPressure << setw(15) << (StericPressure -  CoulombicPressure )<< setw(15)<<endl;
+								 <<  negativeion_density_profile.at(b) << setw(15) << StericPressure << setw(15) << CoulombicPressure << setw(15) << endl;
 			}
 		}
 
